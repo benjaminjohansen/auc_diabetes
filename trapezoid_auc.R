@@ -6,22 +6,33 @@ library("DescTools")
 
 # Trapezoid function ------------------------------------------------------
 
+#' Dataloader function. Update cols_to_use to use your own user defined columns
+#'
+#' @param input_dataframe A dataframe containing at least a time variable (fx years) and an outcome variable (fx serBilir)
+#'
+#' @return A dataframe with your loaded data
+#'
+#' @examples import_data(JMbayes2::pbc2)
 import_data <- function(input_dataframe) {
   cols_to_use <- c("id", "years", "year", "serBilir") # alternative include albumin instead of serBilir, both are NA free
   data <- input_dataframe[cols_to_use] %>%
     dplyr::mutate(
       whole_year = ceiling(year)
     )
-
   # add a column with the whole year
   return(data)
 }
 
-data <- import_data(JMbayes2::pbc2) # For the PBC2 dataset the years = 0 value is the same as years[0] + 1 in most cases.
 
-# Subset data to make it work for one person
-data_sub <- dplyr::filter(data, id %in% c(2, 3))
-
+#' Calculate AUC cumulated over time stamps for a given x-point (time) and a y-point (outcome variable).
+#' Collapses the output based on the last calculated time in the time span
+#'
+#' @param dataframe A dataframe in long-format containing as minimum a column with x-points and y-points.
+#' @param max_timespan (int) The max time span of the time column.
+#'
+#' @return Returns a dataframe in long format with calculated AUC scores.
+#'
+#' @examples
 calculate_trapezoid_auc <- function(dataframe, max_timespan = 10) {
   output_list <- vector("list", length(unique(dataframe$id)))
   names(output_list) <- unique(dataframe$id)
@@ -68,5 +79,12 @@ calculate_trapezoid_auc <- function(dataframe, max_timespan = 10) {
 
   return(output_dataframe)
 }
+
+#TODO make a melt function to turn into wide format
+
+# Execute functions -------------------------------------------------------
+
+
+data <- import_data(JMbayes2::pbc2) # For the PBC2 dataset the years = 0 value is the same as years[0] + 1 in most cases.
 
 data_test <- calculate_trapezoid_auc(data)
