@@ -3,6 +3,7 @@
 library("JMbayes2") # remove this when real data is available
 library("dplyr")
 library("DescTools")
+library("tidyverse")
 
 # Trapezoid function ------------------------------------------------------
 
@@ -34,6 +35,9 @@ import_data <- function(input_dataframe) {
 #'
 #' @examples
 calculate_trapezoid_auc <- function(dataframe, max_timespan = 10) {
+  # Remove unnecessary timespans
+  dataframe <- dataframe %>% dplyr::filter(whole_year <= 10)
+
   output_list <- vector("list", length(unique(dataframe$id)))
   names(output_list) <- unique(dataframe$id)
 
@@ -80,11 +84,35 @@ calculate_trapezoid_auc <- function(dataframe, max_timespan = 10) {
   return(output_dataframe)
 }
 
-#TODO make a melt function to turn into wide format
+# TODO make a melt function to turn into wide format
+
+#' Converts a dataframe from long to wide format. Assumes to have columns named 0 to n.
+#'
+#' @param long_dataframe input dataframe in long-format
+#' @param max_timespan How far the ordering should go
+#'
+#' @return A wide-format dataframe
+#'
+#' @examples wide_dataframe <- create_wide_dataframe(long_dataframe = data_test, max_timespan = max_time)
+create_wide_dataframe <- function(long_dataframe, max_timespan = 10) {
+  ordered_cols <- c("id", 0:max_timespan)
+
+  wide_dataframe <- long_dataframe %>%
+    dplyr::select(id, year, auc) %>%
+    tidyr::pivot_wider(names_from = year, values_from = auc)
+
+  reordered_dataframe <- wide_dataframe %>% dplyr::select(all_of(ordered_cols))
+
+  return(reordered_dataframe)
+}
+
 
 # Execute functions -------------------------------------------------------
-
+# variables
+max_time <- 10
 
 data <- import_data(JMbayes2::pbc2) # For the PBC2 dataset the years = 0 value is the same as years[0] + 1 in most cases.
 
-data_test <- calculate_trapezoid_auc(data)
+data_test <- calculate_trapezoid_auc(dataframe = data, max_timespan = max_time)
+
+wide_dataframe <- create_wide_dataframe(long_dataframe = data_test, max_timespan = max_time)
