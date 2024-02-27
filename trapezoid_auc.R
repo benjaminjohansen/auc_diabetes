@@ -29,14 +29,6 @@ import_data <- function(input_dataframe) {
   return(data)
 }
 
-test <- function(dataframe, column) {
-  return(
-    dplyr::select(dataframe, all_of(!!column))
-  )
-}
-
-test(id_2, "id")
-
 #' Extend a dataframe in time. Meaning, if no records at baseline is made, the first entry is copied to baseline, with time a 0
 #' Extend dataframe up to end-of-follow up if missing data. Will copy the last observed outcome.
 #'
@@ -88,42 +80,6 @@ extend_dataframe <- function(input_dataframe, outcome_variable, time_variable, e
   return(output_dataframe)
 }
 
-# debugonce(extend_dataframe)
-x <- extend_dataframe(input_dataframe = id_2, outcome_variable = "serBilir", time_variable = "year", end_of_study_column = "years")
-plot(id_2$year, id_2$serBilir)
-
-ggplot(data = id_2, aes(x=year, y=serBilir)) +
-  geom_point() +
-  geom_line()
-
-plt <- ggplot() +
-  geom_point(data = id_2, aes(x = year, y = serBilir), color = "blue", alpha = .5, size=4) +
-  geom_point(data = x, aes(x=x_time, y=serBilir), size = 4, alpha=.5) +
-  geom_line(data = x, aes(x=x_time, y=serBilir)) +
-  scale_x_continuous(breaks = seq(0, max(x$whole_year), by=1)) +
-  theme_classic()
-
-ggplot2::ggsave(plot = plt, filename = file.path(project_path,sprintf("plots/%s_point_moving.png", today())))
-#
-#
-#   # If no data recorded at the start, create a row to hold the first recorded value.
-#   if (df$whole_year[1] != 0) {
-#     new_row <- df[1, ]
-#     new_row$whole_year <- 0
-#     new_row$serBilir <- df$serBilir[1]
-#     new_row$year <- 0
-#     df <- rbind(new_row, df)
-#   }
-#
-#   # Keep adding new rows until the end of follow up
-#   while (max(df$whole_year) < max_year) {
-#     new_row <- df[nrow(df), ]
-#     new_row$whole_year <- max(df$whole_year) + 1
-#     new_row$year <- max(df$whole_year) + 1
-#     new_row$serBilir <- last_y
-#     df <- rbind(df, new_row)
-#   }
-
 
 
 
@@ -136,9 +92,13 @@ ggplot2::ggsave(plot = plt, filename = file.path(project_path,sprintf("plots/%s_
 #' @return Returns a dataframe in long format with calculated AUC scores.
 #'
 #' @examples
-calculate_trapezoid_auc <- function(dataframe, max_timespan = 10) {
+
+# TODO: Update to take columns. See extend dataframe for scafolding/inspiration
+calculate_trapezoid_auc <- function(dataframe, max_timespan = NULL) {
   # Remove unnecessary timespans
-  dataframe <- dataframe %>% dplyr::filter(whole_year <= 10)
+  if(max_timespan){
+    dataframe <- dataframe %>% dplyr::filter(whole_year <= max_timespan)
+  }
 
   output_list <- vector("list", length(unique(dataframe$id)))
   names(output_list) <- unique(dataframe$id)
@@ -186,8 +146,6 @@ calculate_trapezoid_auc <- function(dataframe, max_timespan = 10) {
   return(output_dataframe)
 }
 
-# TODO make a melt function to turn into wide format
-
 #' Converts a dataframe from long to wide format. Assumes to have columns named 0 to n.
 #'
 #' @param long_dataframe input dataframe in long-format
@@ -221,6 +179,21 @@ wide_dataframe <- create_wide_dataframe(long_dataframe = data_test, max_timespan
 
 
 # Setting up a test case --------------------------------------------------
+
+# debugonce(extend_dataframe)
+id_2 <- data %>% dplyr::filter(id == 2)
+id_4 <- data %>% dplyr::filter(id == 4)
+
+x <- extend_dataframe(input_dataframe = id_2, outcome_variable = "serBilir", time_variable = "year", end_of_study_column = "years")
+
+plt <- ggplot() +
+  geom_point(data = id_2, aes(x = year, y = serBilir), color = "blue", alpha = .5, size = 4) +
+  geom_point(data = x, aes(x = x_time, y = serBilir), size = 4, alpha = .5) +
+  geom_line(data = x, aes(x = x_time, y = serBilir)) +
+  scale_x_continuous(breaks = seq(0, max(x$whole_year), by = 1)) +
+  theme_classic()
+
+ggplot2::ggsave(plot = plt, filename = file.path(project_path, sprintf("plots/%s_point_moving.png", today())))
 
 id_4 <- data %>% dplyr::filter(id == 4)
 id_4$serBilir[1] <- NaN
