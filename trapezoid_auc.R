@@ -64,6 +64,18 @@ extend_dataframe <- function(input_dataframe, outcome_variable, time_variable, e
     output_dataframe <- rbind(new_row, output_dataframe)
   }
 
+  # update the dataframe with the new time_variable
+  # output_dataframe$x_time = !!sym(time_variable)
+  output_dataframe <- output_dataframe %>%
+    group_by(whole_year) %>%
+    # Find the last row in each whole year
+    dplyr::slice(n()) %>%
+    # add x_time
+    dplyr::mutate(!!sym(time_variable) := ceiling(!!sym(time_variable))) %>%
+    rbind(output_dataframe, .) %>%
+    dplyr::arrange(!!sym(time_variable)) %>%
+    dplyr::distinct()
+
   # Keep adding new rows until the end of follow up
   new_rows <- list()
   current_year <- max(output_dataframe$whole_year)
@@ -71,7 +83,7 @@ extend_dataframe <- function(input_dataframe, outcome_variable, time_variable, e
     current_year <- current_year + 1
     new_row <- output_dataframe[nrow(output_dataframe), ]
     new_row$whole_year <- current_year
-    new_row$x_time <- current_year
+    new_row[[time_variable]] <- current_year
     new_row[[outcome_variable]] <- last_y
     new_rows[[length(new_rows) + 1]] <- new_row
   }
@@ -79,8 +91,6 @@ extend_dataframe <- function(input_dataframe, outcome_variable, time_variable, e
 
   return(output_dataframe)
 }
-
-
 
 
 #' Calculate AUC cumulated over time stamps for a given x-point (time) and a y-point (outcome variable).
@@ -92,11 +102,10 @@ extend_dataframe <- function(input_dataframe, outcome_variable, time_variable, e
 #' @return Returns a dataframe in long format with calculated AUC scores.
 #'
 #' @examples
-
 # TODO: Update to take columns. See extend dataframe for scafolding/inspiration
 calculate_trapezoid_auc <- function(dataframe, max_timespan = NULL) {
   # Remove unnecessary timespans
-  if(max_timespan){
+  if (max_timespan) {
     dataframe <- dataframe %>% dplyr::filter(whole_year <= max_timespan)
   }
 
@@ -179,21 +188,28 @@ wide_dataframe <- create_wide_dataframe(long_dataframe = data_test, max_timespan
 
 
 # Setting up a test case --------------------------------------------------
-
+# TODO: Agree on how we calculate AUC in different time intervals.
 # debugonce(extend_dataframe)
 id_2 <- data %>% dplyr::filter(id == 2)
-id_4 <- data %>% dplyr::filter(id == 4)
+id_4 <- data %>% dplyr::filter(id == 4 & whole_year > 0)
+
+test_id <- import_data(pbc2) %>% dplyr::filter(id == 2)
+test_out <- extend_dataframe(test_id, outcome_variable = "serBilir", time_variable = "year", end_of_study_column = "years")
+
 
 x <- extend_dataframe(input_dataframe = id_2, outcome_variable = "serBilir", time_variable = "year", end_of_study_column = "years")
+y <- extend_dataframe(input_dataframe = id_4, outcome_variable = "serBilir", time_variable = "year", end_of_study_column = "years")
 
 plt <- ggplot() +
-  geom_point(data = id_2, aes(x = year, y = serBilir), color = "blue", alpha = .5, size = 4) +
-  geom_point(data = x, aes(x = x_time, y = serBilir), size = 4, alpha = .5) +
-  geom_line(data = x, aes(x = x_time, y = serBilir)) +
+  geom_point(data = test_id, aes(x = year, y = serBilir), color = "blue", alpha = .5, size = 4) +
+  # geom_point(data = test_out, aes(x = year, y = serBilir), size = 4, alpha = .5) +
+  # geom_line(data = test_out, aes(x = year, y = serBilir)) +
   scale_x_continuous(breaks = seq(0, max(x$whole_year), by = 1)) +
-  theme_classic()
+  theme_minimal()
 
-ggplot2::ggsave(plot = plt, filename = file.path(project_path, sprintf("plots/%s_point_moving.png", today())))
+plt
+
+ggplot2::ggsave(plot = plt, filename = file.path(project_path, sprintf("plots/%s_new_algo.png", today())))
 
 id_4 <- data %>% dplyr::filter(id == 4)
 id_4$serBilir[1] <- NaN
