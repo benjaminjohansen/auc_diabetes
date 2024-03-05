@@ -6,7 +6,7 @@ library("DescTools")
 library("tidyverse")
 library("ggplot2")
 
-project_path <- file.path("C:/SDCA/git/trap_auc")
+project_path <- file.path("C:/SDCA/git/trap_auc") #update to your project path
 results <- file.path(project_path, "results")
 plots <- file.path(project_path, "plots")
 
@@ -222,11 +222,5 @@ test_bayes <- function() {
   return(bayes_output)
 }
 
-head(test_bayes())
 x <- test_bayes()
-
-names(x)
-dplyr::select(x, -"NA")
-if ("NA" %in% names(x)) {
-  dplyr::select(x, -"NA")
-}
+head(x)
