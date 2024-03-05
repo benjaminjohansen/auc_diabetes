@@ -7,6 +7,8 @@ library("tidyverse")
 library("ggplot2")
 
 project_path <- file.path("C:/SDCA/git/trap_auc")
+results <- file.path(project_path, "results")
+plots <- file.path(project_path, "plots")
 
 setwd(project_path)
 
@@ -318,3 +320,143 @@ df$auc[1:nrow(df)] <- sapply(1:nrow(df), function(i) {
 df %>%
   group_by(id, whole_year) %>%
   summarise(auc = max(auc))
+
+
+# Test cases --------------------------------------------------------------
+
+input_test <- tidyr::tibble(
+  id = c(1, 1, 1, 1, 2, 2, 2, 2),
+  years = c(6, 6, 6, 6, 4.6, 4.6, 4.6, 4.6),
+  year = c(0.5, 1.5, 2, 3.5, 1.5, 3, 3.5, 4.5),
+  serBilir = c(1, 2, 2, 1, 1, 2, 1, 0.5)
+)
+
+create_auc <- function(input_dataframe, max_timespan = 10, y_outcome, recorded_time, end_of_follow_up) {
+  input_dataframe <- input_dataframe %>%
+    dplyr::mutate(
+      whole_year = ceiling(year)
+    )
+
+  # Get unique IDs
+  unique_ids <- unique(input_dataframe$id)
+
+  output_data <- dplyr::tibble()
+
+  output_tibble <- dplyr::tibble()
+
+  for (id_unique in unique_ids) {
+    dataframe_subset <- input_dataframe %>% dplyr::filter(id == id_unique)
+
+    # If no data recorded at the start, create a row to hold the first recorded value.
+    if (dataframe_subset$whole_year[1] > 0) {
+      new_row <- dataframe_subset[1, ]
+      new_row$whole_year <- 0
+      new_row[[recorded_time]] <- 0
+      dataframe_subset <- rbind(new_row, dataframe_subset)
+    }
+
+    # Create a copy of the last row with data
+    last_row <- dataframe_subset %>% dplyr::slice(n())
+    # Set the stop criterion:
+    # The minimum of either the max_timespan (function input) or the floored value of end_of_follow_up column.
+    stop_criterion <- min(max_timespan, floor(last_row[[end_of_follow_up]]))
+
+    # Set the last recorded time
+    latest_recording <- ceiling(last_row[[recorded_time]])
+
+    # Calculate AUC on the fly
+    interval <- 1
+
+    id_vec <- vector()
+    x_time_vec <- vector()
+    y_outcome_vec <- vector()
+    # for (year_interval in dataframe_subset$whole_year) {
+    # while (interval <= max(dataframe_subset$whole_year)) {
+    while (interval <= stop_criterion) {
+      temp_auc <- dplyr::tibble()
+
+      auc_data <- dataframe_subset %>%
+        dplyr::filter(whole_year <= interval)
+      last_auc_row <- auc_data %>% dplyr::slice(n())
+
+      if (last_auc_row[[recorded_time]] < interval & last_auc_row[[recorded_time]] != 0) {
+        last_auc_row[[recorded_time]] <- interval #ceiling(last_auc_row[[recorded_time]])
+        temp_auc <- rbind(auc_data, last_auc_row)
+      } else {
+        temp_auc <- auc_data
+      }
+
+      auc <- DescTools::AUC(temp_auc[[recorded_time]], temp_auc[[y_outcome]])
+
+      id_vec <- append(id_vec, id_unique)
+      x_time_vec <- append(x_time_vec, sprintf("Interval 0:%s",interval))
+      y_outcome_vec <- append(y_outcome_vec, auc)
+      # id_vec <- append(id_vec, id_unique)
+      # auc_vector <- rbind(auc_vector, c(id_unique, auc, max(temp_auc$whole_year)))
+      # output_vector <- temp_auc %>%
+      #   dplyr::select(all_of("id", "whole_year", "auc")) %>%
+      #   dplyr::group_by("id") %>% summarise(whole_year = max(whole_year),
+      #                                       auc = max(auc)
+      #                                       ) %>% rbind(auc_vector, rbind)
+      interval <- interval + 1
+    }
+
+    new_rows <- tibble(id = id_vec, x_time = x_time_vec, y_outcome = y_outcome_vec)
+    # output_tibble <- dplyr::tibble(id = id_vec, interval_upper_bound = x_time_vec, y_outcome = y_outcome_vec)
+    output_tibble <- bind_rows(output_tibble, new_rows)
+    # add rows to the end, meaning: to either max_timespan or two the last of years!
+
+
+    # Loop over the dataframe subset as long as the latest_recording <= stop criterion
+    # Then add the new row to the dataframe subset
+    while (latest_recording <= stop_criterion) {
+      new_row <- last_row
+      new_row$year <- latest_recording
+      new_row$whole_year <- latest_recording
+      # Update the subset
+      dataframe_subset <- rbind(new_row, dataframe_subset)
+      # Update latest_recording
+      latest_recording <- latest_recording + 1
+    }
+
+    output_data <- rbind(dataframe_subset)
+  }
+
+  print(output_tibble)
+
+  return(output_tibble)
+}
+
+# debugonce(create_auc)
+test <- create_auc(input_test,
+  y_outcome = "serBilir",
+  recorded_time = "year",
+  end_of_follow_up = "years",
+  max_timespan = 5
+)
+test %>% slice(n())
+
+# calculate AUC for T=1,2,3,4,5
+
+output_test <- data.frame(
+  id = c(1, 2),
+  AUC_T1 = c(1, NA),
+  AUC_T2 = c(3, 2),
+  AUC_T3 = c(5, 3.75),
+  AUC_T4 = c(5.75, 5),
+  AUC_T5 = c(6.75, NA)
+)
+
+plot(input_test$year, input_test$serBilir, col = rep(1:2))
+
+plt <- ggplot(data = input_test, aes(x = year, y = serBilir, colour = as.factor(id))) +
+  geom_point(size = 5, alpha = 0.9) +
+  geom_line() +
+  ylim(0, NA) +
+  xlim(0, NA) +
+  scale_color_grey() +
+  theme_minimal()
+
+plt
+
+ggsave(plt, filename = file.path(plots, sprintf("%s_test_cases.pdf", today())), device = "pdf")
