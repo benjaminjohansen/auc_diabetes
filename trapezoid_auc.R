@@ -12,7 +12,7 @@ plots <- file.path(project_path, "plots")
 
 setwd(project_path)
 
-# Trapezoid function ------------------------------------------------------
+# Functions ------------------------------------------------------
 
 #' Dataloader function. Update cols_to_use to use your own user defined columns
 #'
@@ -43,15 +43,26 @@ create_wide_dataframe <- function(long_dataframe, time_col, id_col, outcome_col,
   ordered_cols <- c("id", 0:max_timespan)
 
   wide_dataframe <- long_dataframe %>%
-    dplyr::select({{id_col}}, {{time_col}}, {{outcome_col}}) %>%
-    tidyr::pivot_wider(names_from = {{time_col}}, values_from = {{outcome_col}})
+    dplyr::select({{ id_col }}, {{ time_col }}, {{ outcome_col }}) %>%
+    tidyr::pivot_wider(names_from = {{ time_col }}, values_from = {{ outcome_col }})
 
   reordered_dataframe <- wide_dataframe %>% dplyr::select(all_of(ordered_cols))
 
   return(reordered_dataframe)
 }
 
-create_auc <- function(input_dataframe, max_timespan = 10, y_outcome, recorded_time, end_of_follow_up) {
+#' Calculate AUC for a dataframe given the x (time) points and the outcome (y) points.
+#'
+#' @param input_dataframe Long dataframe containing the x, and y points
+#' @param max_timespan The maximum time to calculate AUC for
+#' @param y_outcome The column containing the y points
+#' @param recorded_time The column containing the x points
+#' @param end_of_follow_up The column containing the end of follow up time
+#' @param wide If the output should be in wide format, then TRUE, if set to FALSE then long format
+#'
+#' @return A dataframe in either long or wide format with calculated AUC
+#' @examples
+create_auc <- function(input_dataframe, max_timespan = 10, y_outcome, recorded_time, end_of_follow_up, wide = TRUE) {
   # Setup variables, empty tibbles and vectors for holding data
   # Get unique IDs
   unique_ids <- unique(input_dataframe$id)
@@ -83,7 +94,7 @@ create_auc <- function(input_dataframe, max_timespan = 10, y_outcome, recorded_t
     # Create a copy of the last row with data
     last_row <- dataframe_subset %>% dplyr::slice(n())
 
-      # Set the last recorded time
+    # Set the last recorded time
     latest_recording <- ceiling(last_row[[recorded_time]])
 
     # Set the stop criterion:
@@ -142,15 +153,21 @@ create_auc <- function(input_dataframe, max_timespan = 10, y_outcome, recorded_t
 
       # Bind the outcome to the tibble when the over a subject is done
       new_rows <- tibble(id = id_vec, x_time = x_time_vec, y_outcome = y_outcome_vec)
-      print(sprintf("ID %s done", id_unique))
       output_tibble <- bind_rows(output_tibble, new_rows)
-
-    }
-    else {
+    } else {
+      # Bind a row with ID and NA values if the stop criterion is less than or equal to 0
       new_rows <- tibble(id = id_unique, x_time = NA, y_outcome = NA)
-      print(sprintf("ID %s done, had empty rows", id_unique))
       output_tibble <- bind_rows(output_tibble, new_rows)
     }
+  }
+
+  if (wide == TRUE) {
+    output_tibble <- tidyr::pivot_wider(output_tibble, names_from = x_time, values_from = y_outcome)
+    col_names <- names(output_tibble)
+    if ("NA" %in% col_names) {
+      output_tibble <- dplyr::select(output_tibble, -"NA")
+    }
+    print(col_names)
   }
 
   return(output_tibble)
@@ -158,41 +175,58 @@ create_auc <- function(input_dataframe, max_timespan = 10, y_outcome, recorded_t
 
 
 # Test cases --------------------------------------------------------------
-max_time = 5
-input_test <- tidyr::tibble(
-  id = c(1, 1, 1, 1, 2, 2, 2, 2),
-  years = c(6, 6, 6, 6, 4.6, 4.6, 4.6, 4.6),
-  year = c(0.5, 1.5, 2, 3.5, 1.5, 3, 3.5, 4.5),
-  serBilir = c(1, 2, 2, 1, 1, 2, 1, 0.5)
-)
+max_time <- 5
 
-output_test <- data.frame(
-  id = c(1, 2),
-  AUC_T1 = c(1, NA),
-  AUC_T2 = c(3, 2),
-  AUC_T3 = c(5, 3.75),
-  AUC_T4 = c(5.75, 5),
-  AUC_T5 = c(6.75, NA)
-)
+test_simple <- function() {
+  input_test <- tidyr::tibble(
+    id = c(1, 1, 1, 1, 2, 2, 2, 2),
+    years = c(6, 6, 6, 6, 4.6, 4.6, 4.6, 4.6),
+    year = c(0.5, 1.5, 2, 3.5, 1.5, 3, 3.5, 4.5),
+    serBilir = c(1, 2, 2, 1, 1, 2, 1, 0.5)
+  )
 
-test <- create_auc(input_test,
-  y_outcome = "serBilir",
-  recorded_time = "year",
-  end_of_follow_up = "years",
-  max_timespan = max_time
-)
+  output_test <- data.frame(
+    id = c(1, 2),
+    AUC_T1 = c(1, NA),
+    AUC_T2 = c(3, 2),
+    AUC_T3 = c(5, 3.75),
+    AUC_T4 = c(5.75, 5),
+    AUC_T5 = c(6.75, NA)
+  )
 
-output <- tidyr::pivot_wider(test, names_from = x_time, values_from = y_outcome)
+  test <- create_auc(input_test,
+    y_outcome = "serBilir",
+    recorded_time = "year",
+    end_of_follow_up = "years",
+    max_timespan = max_time
+  )
+
+  return(test)
+}
+
+head(test_simple())
 
 
 # Test on JMbayes
+test_bayes <- function() {
+  test_bayes <- import_data(JMbayes2::pbc2) # %>% dplyr::filter(id == 10)
+  # debugonce(create_auc)
+  bayes_output <- create_auc(test_bayes,
+    y_outcome = "serBilir",
+    recorded_time = "year",
+    end_of_follow_up = "years",
+    max_timespan = max_time,
+    wide = TRUE
+  )
 
-test_bayes <- import_data(JMbayes2::pbc2)# %>% dplyr::filter(id == 10)
-# debugonce(create_auc)
-bayest_output <- create_auc(test_bayes,
-                                    y_outcome = "serBilir",
-                                    recorded_time = "year",
-                                    end_of_follow_up = "years",
-                                    max_timespan = max_time
-) %>%
-  tidyr::pivot_wider(., names_from = x_time, values_from = y_outcome)
+  return(bayes_output)
+}
+
+head(test_bayes())
+x <- test_bayes()
+
+names(x)
+dplyr::select(x, -"NA")
+if ("NA" %in% names(x)) {
+  dplyr::select(x, -"NA")
+}
