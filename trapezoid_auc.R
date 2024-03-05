@@ -6,11 +6,13 @@ library("DescTools")
 library("tidyverse")
 library("ggplot2")
 
-project_path <- file.path("C:/SDCA/git/trap_auc")
+project_path <- file.path("C:/SDCA/git/trap_auc") #update to your project path
+results <- file.path(project_path, "results")
+plots <- file.path(project_path, "plots")
 
 setwd(project_path)
 
-# Trapezoid function ------------------------------------------------------
+# Functions ------------------------------------------------------
 
 #' Dataloader function. Update cols_to_use to use your own user defined columns
 #'
@@ -29,132 +31,6 @@ import_data <- function(input_dataframe) {
   return(data)
 }
 
-#' Extend a dataframe in time. Meaning, if no records at baseline is made, the first entry is copied to baseline, with time a 0
-#' Extend dataframe up to end-of-follow up if missing data. Will copy the last observed outcome.
-#'
-#' @param input_dataframe Dataframe that should be extended
-#' @param outcome_variable The column containing the outcome variable (y)
-#' @param time_variable The column containing the time vairable (x)
-#' @param end_of_study_column The end of study column
-#'
-#' @return
-#' @export
-#'
-#' @examples
-extend_dataframe <- function(input_dataframe, outcome_variable, time_variable, end_of_study_column) {
-  # Get last year and last recorded y-outcome:
-  max_year <- floor(input_dataframe[[end_of_study_column]][1])
-  last_y <- tail(input_dataframe[[outcome_variable]], 1)
-
-  # Create a new x_time variable for calculating AUC
-  output_dataframe <- input_dataframe %>%
-    group_by(whole_year) %>%
-    mutate(x_time := ifelse(
-      !!sym(time_variable) == max(!!sym(time_variable)),
-      whole_year,
-      !!sym(time_variable)
-    ))
-
-  # If no data recorded at the start, create a row to hold the first recorded value.
-  if (output_dataframe$whole_year[1] != 0) {
-    new_row <- output_dataframe[1, ]
-    new_row$whole_year <- 0
-    new_row[[time_variable]] <- 0
-    new_row$x_time <- 0
-    output_dataframe <- rbind(new_row, output_dataframe)
-  }
-
-  # update the dataframe with the new time_variable
-  # output_dataframe$x_time = !!sym(time_variable)
-  output_dataframe <- output_dataframe %>%
-    group_by(whole_year) %>%
-    # Find the last row in each whole year
-    dplyr::slice(n()) %>%
-    # add x_time
-    dplyr::mutate(!!sym(time_variable) := ceiling(!!sym(time_variable))) %>%
-    rbind(output_dataframe, .) %>%
-    dplyr::arrange(!!sym(time_variable)) %>%
-    dplyr::distinct()
-
-  # Keep adding new rows until the end of follow up
-  new_rows <- list()
-  current_year <- max(output_dataframe$whole_year)
-  while (current_year < max_year) {
-    current_year <- current_year + 1
-    new_row <- output_dataframe[nrow(output_dataframe), ]
-    new_row$whole_year <- current_year
-    new_row[[time_variable]] <- current_year
-    new_row[[outcome_variable]] <- last_y
-    new_rows[[length(new_rows) + 1]] <- new_row
-  }
-  output_dataframe <- rbind(output_dataframe, do.call(rbind, new_rows))
-
-  return(output_dataframe)
-}
-
-
-#' Calculate AUC cumulated over time stamps for a given x-point (time) and a y-point (outcome variable).
-#' Collapses the output based on the last calculated time in the time span
-#'
-#' @param dataframe A dataframe in long-format containing as minimum a column with x-points and y-points.
-#' @param max_timespan (int) The max time span of the time column.
-#'
-#' @return Returns a dataframe in long format with calculated AUC scores.
-#'
-#' @examples
-# TODO: Update to take columns. See extend dataframe for scafolding/inspiration
-calculate_trapezoid_auc <- function(dataframe, max_timespan = NULL) {
-  # Remove unnecessary timespans
-  if (max_timespan) {
-    dataframe <- dataframe %>% dplyr::filter(whole_year <= max_timespan)
-  }
-
-  output_list <- vector("list", length(unique(dataframe$id)))
-  names(output_list) <- unique(dataframe$id)
-
-  for (unique_id in unique(dataframe$id)) {
-    # create a temp dataframe
-    temp_dataframe <- dataframe %>% dplyr::filter(id == unique_id)
-    vector_size <- nrow(temp_dataframe)
-    vector_hold <- vector(mode = "list", length = vector_size)
-
-    # Check if the first point is NA
-    # TODO: Might need to be updated to overwrite the first point if NA to the second point?!
-    if (is.na(dataframe$serBilir[1])) {
-      from_point <- 2
-      vector_hold[1] <- NaN
-    } else {
-      from_point <- 1
-    }
-
-    # Iteratively loop through each set of x-y coordinates from: from_point to i (max length of data for patient)
-    temp_dataframe$auc[from_point:vector_size] <- sapply(from_point:vector_size, function(i) {
-      DescTools::AUC(
-        x = temp_dataframe$year[from_point:i],
-        y = temp_dataframe$serBilir[from_point:i],
-        method = "trapezoid"
-      )
-    })
-
-    # Collapse datframe to whole years only
-    temp_dataframe <- temp_dataframe %>%
-      dplyr::select(id, years, year, serBilir, whole_year, auc) %>%
-      dplyr::group_by(id, years, whole_year) %>%
-      dplyr::summarise(
-        last_meassure_year = last(year),
-        serBilir = last(serBilir),
-        auc = last(auc),
-        .groups = "drop"
-      ) %>%
-      dplyr::rename(year = whole_year)
-
-    output_list[[as.character(unique_id)]] <- temp_dataframe
-  }
-  output_dataframe <- do.call(rbind, output_list)
-
-  return(output_dataframe)
-}
-
 #' Converts a dataframe from long to wide format. Assumes to have columns named 0 to n.
 #'
 #' @param long_dataframe input dataframe in long-format
@@ -163,158 +39,188 @@ calculate_trapezoid_auc <- function(dataframe, max_timespan = NULL) {
 #' @return A wide-format dataframe
 #'
 #' @examples wide_dataframe <- create_wide_dataframe(long_dataframe = data_test, max_timespan = max_time)
-create_wide_dataframe <- function(long_dataframe, max_timespan = 10) {
+create_wide_dataframe <- function(long_dataframe, time_col, id_col, outcome_col, max_timespan = 10) {
   ordered_cols <- c("id", 0:max_timespan)
 
   wide_dataframe <- long_dataframe %>%
-    dplyr::select(id, year, auc) %>%
-    tidyr::pivot_wider(names_from = year, values_from = auc)
+    dplyr::select({{ id_col }}, {{ time_col }}, {{ outcome_col }}) %>%
+    tidyr::pivot_wider(names_from = {{ time_col }}, values_from = {{ outcome_col }})
 
   reordered_dataframe <- wide_dataframe %>% dplyr::select(all_of(ordered_cols))
 
   return(reordered_dataframe)
 }
 
+#' Calculate AUC for a dataframe given the x (time) points and the outcome (y) points.
+#'
+#' @param input_dataframe Long dataframe containing the x, and y points
+#' @param max_timespan The maximum time to calculate AUC for
+#' @param y_outcome The column containing the y points
+#' @param recorded_time The column containing the x points
+#' @param end_of_follow_up The column containing the end of follow up time
+#' @param wide If the output should be in wide format, then TRUE, if set to FALSE then long format
+#'
+#' @return A dataframe in either long or wide format with calculated AUC
+#' @examples
+create_auc <- function(input_dataframe, max_timespan = 10, y_outcome, recorded_time, end_of_follow_up, wide = TRUE) {
+  # Setup variables, empty tibbles and vectors for holding data
+  # Get unique IDs
+  unique_ids <- unique(input_dataframe$id)
 
-# Execute functions -------------------------------------------------------
-# variables
-max_time <- 10
-
-data <- import_data(JMbayes2::pbc2) # For the PBC2 dataset the years = 0 value is the same as years[0] + 1 in most cases.
-
-data_test <- calculate_trapezoid_auc(dataframe = data, max_timespan = max_time)
-
-wide_dataframe <- create_wide_dataframe(long_dataframe = data_test, max_timespan = max_time)
-
-
-# Setting up a test case --------------------------------------------------
-# TODO: Agree on how we calculate AUC in different time intervals.
-# debugonce(extend_dataframe)
-id_2 <- data %>% dplyr::filter(id == 2)
-id_4 <- data %>% dplyr::filter(id == 4 & whole_year > 0)
-
-test_id <- import_data(pbc2) %>% dplyr::filter(id == 2)
-test_out <- extend_dataframe(test_id, outcome_variable = "serBilir", time_variable = "year", end_of_study_column = "years")
+  # Tibble to hold the output
+  output_tibble <- dplyr::tibble()
 
 
-x <- extend_dataframe(input_dataframe = id_2, outcome_variable = "serBilir", time_variable = "year", end_of_study_column = "years")
-y <- extend_dataframe(input_dataframe = id_4, outcome_variable = "serBilir", time_variable = "year", end_of_study_column = "years")
+  # Add a column to the input data with whole years. These will be used to split intervals.
+  input_dataframe <- input_dataframe %>%
+    dplyr::mutate(
+      whole_year = ceiling(year)
+    )
 
-plt <- ggplot() +
-  geom_point(data = test_id, aes(x = year, y = serBilir), color = "blue", alpha = .5, size = 4) +
-  # geom_point(data = test_out, aes(x = year, y = serBilir), size = 4, alpha = .5) +
-  # geom_line(data = test_out, aes(x = year, y = serBilir)) +
-  scale_x_continuous(breaks = seq(0, max(x$whole_year), by = 1)) +
-  theme_minimal()
 
-plt
+  # Main script
+  # 1) Split by ID
+  # 2) If no recording at time 0, add a first row for the ID at time 0
+  # 3) For each interval,
+  #   calculate the AUC.
+  #   Copy points nearest to the interval.
+  #   Stop when reaching stop criterion
 
-ggplot2::ggsave(plot = plt, filename = file.path(project_path, sprintf("plots/%s_new_algo.png", today())))
+  for (id_unique in unique_ids) {
+    # Subset the data by ID
+    dataframe_subset <- input_dataframe %>% dplyr::filter(id == id_unique)
 
-id_4 <- data %>% dplyr::filter(id == 4)
-id_4$serBilir[1] <- NaN
-id_4$whole_year
+    ## Create variables to use
+    # Create a copy of the last row with data
+    last_row <- dataframe_subset %>% dplyr::slice(n())
 
-id_4 %>% dplyr::mutate(lag_year = lag(year), lead_year = lead(year), lag_y = lag(serBilir), lead_y = (serBilir))
+    # Set the last recorded time
+    latest_recording <- ceiling(last_row[[recorded_time]])
 
-id_4 %>%
-  dplyr::group_by(id, years, whole_year, serBilir, year) %>%
-  dplyr::mutate(lag = lag(serBilir), lead(serBilir)) %>%
-  dplyr::summarise(first_in_year = min(year), last_in_year = max(year))
+    # Set the stop criterion:
+    # The minimum of either the max_timespan (function input) or the floored value of end_of_follow_up column.
+    stop_criterion <- min(max_timespan, floor(last_row[[end_of_follow_up]]))
 
-# function to get points to calculate AUC
-get_time_interval <- function(input_dataframe, x, y, x_start, x_end) {
-  output_data <- dplyr::select(input_dataframe[[x]], inputdataframe[[y]]) %>%
-    dplyr::filter(between(input_dataframe[[x]]), x_start, x_end)
+    if (stop_criterion > 0) {
+      # Use the interval as a counter
+      interval <- 1
 
-  return(output_data)
+      # Empty vectors to hold the results
+      id_vec <- vector()
+      x_time_vec <- vector()
+      y_outcome_vec <- vector()
+
+
+      # If no data recorded at the start, create a row to hold the first recorded value.
+      if (dataframe_subset$whole_year[1] > 0) {
+        new_row <- dataframe_subset[1, ]
+        new_row$whole_year <- 0
+        new_row[[recorded_time]] <- 0
+        dataframe_subset <- rbind(new_row, dataframe_subset)
+      }
+
+      ## Start the loop
+      # As long as the interval is less than or equal to the stop criterion, keep calculating AUC
+      while (interval <= stop_criterion) {
+        temp_auc <- dplyr::tibble()
+
+        # Subset data for the given interval
+        auc_data <- dataframe_subset %>%
+          dplyr::filter(whole_year <= interval)
+
+        # Create a copy of the last row - will be needed
+        last_auc_row <- auc_data %>% dplyr::slice(n())
+
+        # If the time of the last row is less than the current interval time and is NOT 0, then add a row
+        # to the subsetted data
+        if (last_auc_row[[recorded_time]] < interval & last_auc_row[[recorded_time]] != 0) {
+          last_auc_row[[recorded_time]] <- interval # ceiling(last_auc_row[[recorded_time]])
+          temp_auc <- rbind(auc_data, last_auc_row)
+        } else {
+          temp_auc <- auc_data
+        }
+
+        # Calculate the AUC
+        auc <- DescTools::AUC(temp_auc[[recorded_time]], temp_auc[[y_outcome]])
+
+        # Add the ID, the interval and the calculated AUC to vectors
+        id_vec <- append(id_vec, id_unique)
+        x_time_vec <- append(x_time_vec, sprintf("Interval 0:%s", interval))
+        y_outcome_vec <- append(y_outcome_vec, auc)
+
+        interval <- interval + 1
+      }
+
+      # Bind the outcome to the tibble when the over a subject is done
+      new_rows <- tibble(id = id_vec, x_time = x_time_vec, y_outcome = y_outcome_vec)
+      output_tibble <- bind_rows(output_tibble, new_rows)
+    } else {
+      # Bind a row with ID and NA values if the stop criterion is less than or equal to 0
+      new_rows <- tibble(id = id_unique, x_time = NA, y_outcome = NA)
+      output_tibble <- bind_rows(output_tibble, new_rows)
+    }
+  }
+
+  if (wide == TRUE) {
+    output_tibble <- tidyr::pivot_wider(output_tibble, names_from = x_time, values_from = y_outcome)
+    col_names <- names(output_tibble)
+    if ("NA" %in% col_names) {
+      output_tibble <- dplyr::select(output_tibble, -"NA")
+    }
+    print(col_names)
+  }
+
+  return(output_tibble)
 }
 
-dplyr::select(id_4, year, serBilir, whole_year) %>%
-  dplyr::group_by(whole_year) %>%
-  dplyr::summarise(min_y = min(serBilir), max_y = max(serBilir), min_year = min(year), max_year = max(year)) %>%
-  dplyr::mutate(
-    floor_year = floor(min_year),
-    ceil_year = ceiling(max_year)
+
+# Test cases --------------------------------------------------------------
+max_time <- 5
+
+test_simple <- function() {
+  input_test <- tidyr::tibble(
+    id = c(1, 1, 1, 1, 2, 2, 2, 2),
+    years = c(6, 6, 6, 6, 4.6, 4.6, 4.6, 4.6),
+    year = c(0.5, 1.5, 2, 3.5, 1.5, 3, 3.5, 4.5),
+    serBilir = c(1, 2, 2, 1, 1, 2, 1, 0.5)
   )
 
-max(id_4$whole_year)
-min(id_4$whole_year)
-
-
-dplyr::filter(between(input_dataframe[[x]]), x_start, x_end)
-
-get_time_interval(id_4, "year", "serBilir", 0, 2)
-DescTools::AUC(c(0, 0.55, 1, 1.001, 1.02, 1.99), c(1.6, 1.6, 1.6, 1.7, 1.7, 3.2))
-
-plot(c(0, 0.55, 1, 1.001, 1.02, 1.99), c(1.6, 1.6, 1.6, 1.7, 1.7, 3.2), ylim = c(0, 4))
-
-# Testing for itterations
-# Update year to whole_year if year is the maximum within each whole_year group
-id_2 <- dplyr::filter(data, id == 2 & whole_year > 0)
-id_2
-
-# Get last year and last recorded y-outcome:
-max_year <- floor(df$years[1])
-last_y <- tail(df$serBilir, 1)
-
-# update the last row of recorded data. Set the last year to whole_year
-df <- id_2 %>%
-  # group_by(whole_year) %>%
-  mutate(test = ifelse(
-    year == max(year),
-    whole_year,
-    year
-  ))
-# update all rows
-df <- id_4 %>%
-  group_by(whole_year) %>%
-  mutate(test = ifelse(
-    year == max(year),
-    whole_year,
-    year
-  ))
-df
-
-my_function <- function(input_data, time_variable) {
-  df <- input_data %>%
-    group_by(whole_year) %>%
-    mutate(!!sym(time_variable) := ifelse(
-      !!sym(time_variable) == max(!!sym(time_variable)),
-      whole_year,
-      !!sym(time_variable)
-    ))
-  return(df)
-}
-
-x <- my_function(id_4, "year")
-
-# If no data recorded at the start, create a row to hold the first recorded value.
-if (df$whole_year[1] != 0) {
-  new_row <- df[1, ]
-  new_row$whole_year <- 0
-  new_row$serBilir <- df$serBilir[1]
-  new_row$year <- 0
-  df <- rbind(new_row, df)
-}
-
-# Keep adding new rows until the end of follow up
-while (max(df$whole_year) < max_year) {
-  new_row <- df[nrow(df), ]
-  new_row$whole_year <- max(df$whole_year) + 1
-  new_row$year <- max(df$whole_year) + 1
-  new_row$serBilir <- last_y
-  df <- rbind(df, new_row)
-}
-
-df$auc[1:nrow(df)] <- sapply(1:nrow(df), function(i) {
-  DescTools::AUC(
-    x = df$year[1:i],
-    y = df$serBilir[1:i],
-    method = "trapezoid"
+  output_test <- data.frame(
+    id = c(1, 2),
+    AUC_T1 = c(1, NA),
+    AUC_T2 = c(3, 2),
+    AUC_T3 = c(5, 3.75),
+    AUC_T4 = c(5.75, 5),
+    AUC_T5 = c(6.75, NA)
   )
-})
 
-df %>%
-  group_by(id, whole_year) %>%
-  summarise(auc = max(auc))
+  test <- create_auc(input_test,
+    y_outcome = "serBilir",
+    recorded_time = "year",
+    end_of_follow_up = "years",
+    max_timespan = max_time
+  )
+
+  return(test)
+}
+
+head(test_simple())
+
+
+# Test on JMbayes
+test_bayes <- function() {
+  test_bayes <- import_data(JMbayes2::pbc2) # %>% dplyr::filter(id == 10)
+  # debugonce(create_auc)
+  bayes_output <- create_auc(test_bayes,
+    y_outcome = "serBilir",
+    recorded_time = "year",
+    end_of_follow_up = "years",
+    max_timespan = max_time,
+    wide = TRUE
+  )
+
+  return(bayes_output)
+}
+
+x <- test_bayes()
+head(x)
