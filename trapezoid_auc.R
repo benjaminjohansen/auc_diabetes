@@ -6,7 +6,7 @@ library("DescTools")
 library("tidyverse")
 library("ggplot2")
 
-project_path <- file.path("C:/SDCA/git/trap_auc") #update to your project path
+project_path <- file.path("C:/SDCA/git/trap_auc") # update to your project path
 results <- file.path(project_path, "results")
 plots <- file.path(project_path, "plots")
 
@@ -74,7 +74,7 @@ create_auc <- function(input_dataframe, max_timespan = 10, y_outcome, recorded_t
   # Add a column to the input data with whole years. These will be used to split intervals.
   input_dataframe <- input_dataframe %>%
     dplyr::mutate(
-      whole_year = ceiling(year)
+      whole_year = ceiling(!!sym(recorded_time))
     )
 
 
