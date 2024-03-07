@@ -1,20 +1,16 @@
 # Setup -------------------------------------------------------------------
 
 library("JMbayes2") # remove this when real data is available
-library("dplyr")
-library("DescTools")
 library("tidyverse")
-library("ggplot2")
+library("DescTools")
 
 project_path <- file.path("C:/SDCA/git/trap_auc") # update to your project path
-results <- file.path(project_path, "results")
-plots <- file.path(project_path, "plots")
 
 setwd(project_path)
 
 # Functions ------------------------------------------------------
 
-#' Dataloader function. Update cols_to_use to use your own user defined columns
+#' Dataloader function.
 #'
 #' @param input_dataframe A dataframe containing at least a time variable (fx years) and an outcome variable (fx serBilir)
 #'
@@ -22,7 +18,6 @@ setwd(project_path)
 #'
 #' @examples import_data(JMbayes2::pbc2)
 import_data <- function(input_dataframe) {
-  cols_to_use <- c("id", "years", "year", "serBilir") # alternative include albumin instead of serBilir, both are NA free
   data <- input_dataframe[cols_to_use] %>%
     dplyr::mutate(
       whole_year = ceiling(year)
